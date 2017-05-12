@@ -1,0 +1,25 @@
+{
+  "appid": "",
+  "group": "",
+  "title": "Recent USGS Earthquakes",
+  "webmap": "ce9b937876f74f4898bd97ed5a07be30",
+  "webscene": "",
+  "portalUrl": "https://www.arcgis.com",
+  "oauthappid": "hrFP8yDGOiGFx4ub",
+  "proxyurl": "https://maps.esri.com/proxy/DotNet/proxy.ashx",
+  "units": "",
+  "helperServices": {
+    "geometry": {
+      "url": null
+    },
+    "printTask": {
+      "url": null
+    },
+    "elevationSync": {
+      "url": null
+    },
+    "geocode": [{
+      "url": null
+    }]
+  }
+}
