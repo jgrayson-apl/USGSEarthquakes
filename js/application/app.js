@@ -285,6 +285,8 @@ define([
         startOfTodayUTC
       ];
 
+      this.startOfThisWeek = thisWeek[0];
+
       this.currentFilter = {
         maxMag: 10.0,
         range: [thisWeek[0], thisWeek[1]],
@@ -310,8 +312,8 @@ define([
 
 
       // http://www.arcgis.com/home/item.html?id=af7568d8579048f7b42e534891824029
-      // http://apl.maps.arcgis.com/home/item.html?id=fa8e34b9d4514903a3ac34323780fb32#data
-      var usgsEarthquakeDataUrl = "https://livefeeds.arcgis.com/arcgis/rest/services/LiveFeeds/USGS_Seismic_Data/MapServer";
+      // https://livefeeds.arcgis.com/arcgis/rest/services/LiveFeeds/USGS_Seismic_Data/MapServer/11
+      //var usgsEarthquakeDataUrl = "https://livefeeds.arcgis.com/arcgis/rest/services/LiveFeeds/USGS_Seismic_Data/MapServer";
 
       /*
 
@@ -393,153 +395,160 @@ define([
         return earthquakeNode;
       }
 
-
       // EARTHQUAKES LAYER //
-      this.earthquakesLayer = new FeatureLayer({
-        url: usgsEarthquakeDataUrl,
-        layerId: 11,
-        title: "USGS Earthquakes",
-        copyright: "USGS",
-        outFields: ["*"],
-        opacity: 0.8,
-        renderer: new SimpleRenderer({
-          label: "Earthquake",
-          symbol: new SimpleMarkerSymbol({
-            color: Color.named.orange,
-            outline: new SimpleLineSymbol({ color: Color.named.white.concat(0.9), width: 1.5 }),
-            size: "11pt"
-          }),
-          visualVariables: [
-            {
-              type: "size",
-              field: "mag",
-              minDataValue: 1,
-              maxDataValue: 7,
-              minSize: 7,
-              maxSize: 35
-            },
-            {
-              type: "color",
-              field: "mag",
-              minDataValue: 1,
-              maxDataValue: 7,
-              stops: [
-                { value: 1, color: Color.named.darkred },
-                { value: 5, color: Color.named.darkorange },
-                { value: 7, color: Color.named.orange }
-              ]
-            }//,
-            /*{
-             type: "opacity",
-             field: "hoursOld",
-             legendOptions: {
-             title: "How Recent?"
-             },
-             stops: [
-             { value: 140, opacity: 0.2, label: "a week ago" },
-             { value: 24, opacity: 1.0, label: "today" }
-             ]
-             }*/
-          ]
-        }),
-        labelsVisible: true,
-        labelingInfo: [
-          new LabelClass({
-            labelExpressionInfo: {
-              value: "{mag}"
-            },
-            where: "mag >= 5.0",
-            labelPlacement: "above-center",
-            symbol: new LabelSymbol3D({
-              symbolLayers: [
-                new TextSymbol3DLayer({
-                  material: { color: Color.named.white },
-                  size: 11,
-                  font: { style: "normal", weight: "bold", family: "Avenir Next W00" }
-                })
-              ]
-            })
+      // http://www.arcgis.com/home/item.html?id=1ab2089b5433430b8515494e02af46a7
+      // LOAD LAYER FROM ITEM //      
+      Layer.fromPortalItem({ portalItem: { id: "1ab2089b5433430b8515494e02af46a7" } }).then(function (earthquakesLayer) {
+        earthquakesLayer.load().then(function () {
+          //console.info("EARTHQUAKES LAYER: ", earthquakesLayer);
+
+          //var outlineColor = Color.named.black.concat(0.5);
+          var outlineColor = new Color("#242424");
+          outlineColor.a = 0.6;
+
+          // EARTHQUAKES LAYER //
+          this.earthquakesLayer = earthquakesLayer;
+          this.earthquakesLayer.title = "USGS Earthquakes";
+          this.earthquakesLayer.copyright = "USGS";
+          this.earthquakesLayer.renderer = new SimpleRenderer({
+            label: "Earthquake",
+            symbol: new SimpleMarkerSymbol({
+              color: Color.named.orange,
+              outline: new SimpleLineSymbol({ color: outlineColor, width: 0.5 }),
+              size: "11pt"
+            }),
+            visualVariables: [
+              {
+                type: "size",
+                field: "mag",
+                minDataValue: 1,
+                maxDataValue: 8,
+                minSize: 5,
+                maxSize: 37
+              },
+              {
+                type: "color",
+                field: "mag",
+                minDataValue: 1,
+                maxDataValue: 8,
+                stops: [
+                  { value: 1, color: Color.named.darkred },
+                  { value: 5, color: Color.named.darkorange },
+                  { value: 7, color: Color.named.orange }
+                ]
+              },
+              {
+                type: "opacity",
+                legendOptions: {
+                  title: "How Recent?"
+                },
+                field: function (feature) {
+                  var currTime = this.getStartOfDayUTC(this.currentFilter.range[0]);
+                  var evtTime = this.getStartOfDayUTC(new Date(feature.getAttribute("eventTime")));
+                  return date.difference(evtTime, currTime, "day");
+                }.bind(this),
+                stops: [
+                  { value: 6, opacity: 0.05, label: "a week ago" },
+                  { value: 1, opacity: 0.33 },
+                  { value: 0, opacity: 1.0, label: "today" }
+                ]
+              }
+            ]
           })
-        ],
-        popupTemplate: { title: "{place}", content: earthquakePopupContent }
-      });
-      this.earthquakesLayer.load().then(function () {
-        console.info("LAYER: ", this.earthquakesLayer);
+          this.earthquakesLayer.popupTemplate = new PopupTemplate({ title: "{place}", content: earthquakePopupContent });
 
-        // DATE RANGE LABEL NODE //
-        var dateRangeLabelNode = domConstruct.create("div", { className: "date-range-label" });
-        view.ui.add(dateRangeLabelNode, { position: "top-right", index: 0 });
+          // ADD EARTHQUAKE LAYER TO MAP //
+          view.map.add(this.earthquakesLayer);
 
-        // FILTER BY DATE //
-        this.filterEarthquakes = function () {
-          view.popup.close();
-          var toDate = date.add(this.currentFilter.range[1], "second", -1);
-          this.earthquakesLayer.definitionExpression = this.formatISODatesForQuery(this.currentFilter.range[0], toDate, this.currentFilter.maxMag);
-          dateRangeLabelNode.innerHTML = lang.replace("{0} to {1}", [this.currentFilter.range[0].toUTCString(), toDate.toUTCString()]);
-          //dateRangeLabelNode.innerHTML = this.earthquakesLayer.definitionExpression;
-        }.bind(this);
+          // DATE RANGE LABEL NODE //
+          var dateRangeLabelNode = domConstruct.create("div", { className: "date-range-label" });
+          view.ui.add(dateRangeLabelNode, { position: "top-right", index: 0 });
 
-        // ADD EARTHQUAKE LAYER TO MAP //
-        view.map.add(this.earthquakesLayer);
+          // FILTER BY DATE //
+          this.filterEarthquakes = function () {
+            view.popup.close();
+            var toDate = date.add(this.currentFilter.range[1], "second", -1);
 
-        //
-        // USGS Earthquakes in the past week //
-        //
-        var dayOfWeekNode = registry.byId("options-top-pane").containerNode;
-        domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Day" }, dayOfWeekNode);
-        var histogramNode = domConstruct.create("div", { className: "options-content-node" }, dayOfWeekNode);
+            // FROM START OF THE WEEK //
+            this.earthquakesLayer.definitionExpression = this.formatISODatesForQuery(this.startOfThisWeek, toDate, this.currentFilter.maxMag);
+            // FOR JUST ONE DAY //
+            //this.earthquakesLayer.definitionExpression = this.formatISODatesForQuery(this.currentFilter.range[0], toDate, this.currentFilter.maxMag);
 
-        //
-        // Earthquake Count By Hour of Day //
-        //
-        var byHourNode = registry.byId("options-center-pane").containerNode;
-        var hourLabelNode = domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Hour of Day" }, byHourNode);
-        var clearHourNode = domConstruct.create("span", { className: "options-clear esri-icon-close", title: "Clear Hour Filter" }, hourLabelNode);
-        on(clearHourNode, "click", function () {
-          var startDate = this.getStartOfDayUTC(this.currentFilter.range[0]);
-          this.updateFilter({
-            maxMag: 10.0,
-            range: [startDate, date.add(startDate, "day", 1)],
-            isDayUpdate: true
-          });
-          this.filterEarthquakes();
+            dateRangeLabelNode.innerHTML = lang.replace("{0} to {1}", [this.currentFilter.range[0].toUTCString(), toDate.toUTCString()]);
+            //dateRangeLabelNode.innerHTML = this.earthquakesLayer.definitionExpression;
+          }.bind(this);
+
+          //
+          // USGS Earthquakes in the past week //
+          //
+          var dayOfWeekNode = registry.byId("options-top-pane").containerNode;
+          domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Day" }, dayOfWeekNode);
+          var histogramNode = domConstruct.create("div", { className: "options-content-node" }, dayOfWeekNode);
+
+          //
+          // Earthquake Count By Hour of Day //
+          //
+          var byHourNode = registry.byId("options-center-pane").containerNode;
+          var hourLabelNode = domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Hour of Day" }, byHourNode);
+          var clearHourNode = domConstruct.create("span", { className: "options-clear esri-icon-close", title: "Clear Hour Filter" }, hourLabelNode);
+          on(clearHourNode, "click", function () {
+            var startDate = this.getStartOfDayUTC(this.currentFilter.range[0]);
+            this.updateFilter({
+              maxMag: 10.0,
+              range: [startDate, date.add(startDate, "day", 1)],
+              isDayUpdate: true
+            });
+            this.filterEarthquakes();
+            this.updateDisplays();
+          }.bind(this));
+          // TOGGLE HOURS DISPLAY //
+          var optionToggleNode = domConstruct.create("span", { className: "options-toggle esri-icon-refresh", title: "Toggle Single/Dual Clock Display" }, hourLabelNode);
+          this.useSingleClock = true;
+          on(optionToggleNode, "click", function () {
+            this.useSingleClock = (!this.useSingleClock);
+            this.updateDisplays();
+          }.bind(this));
+
+          // HOURS CONTENTS NODE //
+          var byHourContentsNode = domConstruct.create("div", { id: "byHour-contents-node", className: "options-content-node" }, byHourNode);
+
+          //
+          // Earthquake Count By Magnitude //
+          //
+          var byMagnitudeNode = registry.byId("options-bottom-pane").containerNode;
+          var magnitudeLabelNode = domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Magnitude" }, byMagnitudeNode);
+          var clearMagnitudeNode = domConstruct.create("span", { className: "options-clear esri-icon-close", title: "Clear Magnitude Filter" }, magnitudeLabelNode);
+          on(clearMagnitudeNode, "click", function () {
+            this.updateFilter({
+              maxMag: 10.0,
+              isDayUpdate: false
+            });
+            this.filterEarthquakes();
+            this.updateDisplays();
+          }.bind(this));
+
+          // MAGNITUDES CONTENTS NODE //
+          var byMagnitudeContentsNode = domConstruct.create("div", { id: "byMagnitude-contents-node", className: "options-content-node" }, byMagnitudeNode);
+
+          this.initializeHistogram(view, this.earthquakesLayer, thisWeek, histogramNode);
+
+          this.updateEarthquakeDashboard = function (features) {
+            this._updateEarthquakeDashboard(features, byHourContentsNode, byMagnitudeContentsNode);
+          }
+
         }.bind(this));
-        // TOGGLE HOURS DISPLAY //
-        var optionToggleNode = domConstruct.create("span", { className: "options-toggle esri-icon-refresh", title: "Toggle Single/Dual Clock Display" }, hourLabelNode);
-        this.useSingleClock = true;
-        on(optionToggleNode, "click", function () {
-          this.useSingleClock = (!this.useSingleClock);
-          this.updateDisplays();
-        }.bind(this));
-
-        // HOURS CONTENTS NODE //
-        var byHourContentsNode = domConstruct.create("div", { id: "byHour-contents-node", className: "options-content-node" }, byHourNode);
-
-        //
-        // Earthquake Count By Magnitude //
-        //
-        var byMagnitudeNode = registry.byId("options-bottom-pane").containerNode;
-        var magnitudeLabelNode = domConstruct.create("div", { className: "options-label", innerHTML: "Earthquake Count By Magnitude" }, byMagnitudeNode);
-        var clearMagnitudeNode = domConstruct.create("span", { className: "options-clear esri-icon-close", title: "Clear Magnitude Filter" }, magnitudeLabelNode);
-        on(clearMagnitudeNode, "click", function () {
-          this.updateFilter({
-            maxMag: 10.0,
-            isDayUpdate: false
-          });
-          this.filterEarthquakes();
-        }.bind(this));
-
-        // MAGNITUDES CONTENTS NODE //
-        var byMagnitudeContentsNode = domConstruct.create("div", { id: "byMagnitude-contents-node", className: "options-content-node" }, byMagnitudeNode);
-
-        this.initializeHistogram(view, this.earthquakesLayer, thisWeek, histogramNode);
-        this.monitorGraphicsChange(view, this.earthquakesLayer, byHourContentsNode, byMagnitudeContentsNode);
-
       }.bind(this));
 
 
     },
 
+    /**
+     *
+     * @param view
+     * @param featureLayer
+     * @param thisWeek
+     * @param histogramNode
+     */
     initializeHistogram: function (view, featureLayer, thisWeek, histogramNode) {
 
       // MONTH NAMES //
@@ -555,14 +564,22 @@ define([
         // DAY OF WEEK QUERY //
         var dayOfThisWeekQuery = featureLayer.createQuery();
         dayOfThisWeekQuery.where = this.formatISODatesForQuery(dayOfThisWeek, toDate);
-        dayOfThisWeekQuery.returnGeometry = false;
+        dayOfThisWeekQuery.returnGeometry = true;
         //console.info(dayOfThisWeekQuery);
 
         // GET FEATURE COUNT FOR EACH BIN //
-        return featureLayer.queryFeatureCount(dayOfThisWeekQuery).then(function (count) {
+        /*return featureLayer.queryFeatureCount(dayOfThisWeekQuery).then(function (count) {
+         return {
+         dayOfThisWeek: dayOfThisWeek,
+         count: count
+         };
+         }.bind(this), console.warn);*/
+
+        return featureLayer.queryFeatures(dayOfThisWeekQuery).then(function (countFeatureSet) {
           return {
             dayOfThisWeek: dayOfThisWeek,
-            count: count
+            features: countFeatureSet.features,
+            count: countFeatureSet.features.length
           };
         }.bind(this), console.warn);
 
@@ -606,12 +623,12 @@ define([
             on(binNode, "click", function (evt) {
               query(".histogram-bin").removeClass("bin-selected");
               domClass.add(binNode, "bin-selected");
-              //this.updateEarthquakeDashboard(dateQueryInfo.features);
               this.updateFilter({
                 range: [dayOfThisWeek, date.add(dayOfThisWeek, "day", 1)],
                 isDayUpdate: true
               });
               this.filterEarthquakes();
+              this.updateEarthquakeDashboard(dateQueryInfo.features);
               this.playback.setPlayIndex(dateQueryInfosIndex, false);
             }.bind(this));
 
@@ -653,95 +670,59 @@ define([
 
     },
 
-    /*updateEarthquakeDashboard: function (features) {
+    /**
+     *
+     * @param features
+     * @param byHourContentsNode
+     * @param byMagnitudeContentsNode
+     * @private
+     */
+    _updateEarthquakeDashboard: function (features, byHourContentsNode, byMagnitudeContentsNode) {
 
-     if(!this.currentHour) {
+      if(this.currentFilter.isDayUpdate) {
 
-     // CRETE AGGREGATION OF MAGNITUDES AND HOURS OF DAY //
-     var magnitudes = {};
-     var hoursOfDay = {};
-     features.forEach(function (graphic) {
+        var currTime = this.getStartOfDayUTC(this.currentFilter.range[0]);
 
-     // CRETE AGGREGATION OF MAGNITUDES //
-     var magnitude = +graphic.getAttribute("mag");
-     var magnitudeIndex = Math.floor(magnitude);
-     var magnitudeCount = magnitudes[magnitudeIndex];
-     magnitudes[magnitudeIndex] = (magnitudeCount) ? (magnitudeCount + 1) : 1;
+        // CRETE AGGREGATION OF MAGNITUDES AND HOURS OF DAY //
+        var magnitudes = {};
+        var hoursOfDay = {};
+        features.forEach(function (graphic, gIndex) {
 
-     // CRETE AGGREGATION OF HOURS OF DAY //
-     var eventTime = new Date(graphic.getAttribute("eventTime"));
-     var hourOfDayIndex = eventTime.getUTCHours();
-     var hourOfDayCount = hoursOfDay[hourOfDayIndex];
-     hoursOfDay[hourOfDayIndex] = (hourOfDayCount) ? (hourOfDayCount + 1) : 1;
+          var evtTime = this.getStartOfDayUTC(new Date(graphic.getAttribute("eventTime")));
+          var daysDiff = date.difference(evtTime, currTime, "day");
+          if(daysDiff === 0) {
 
-     }.bind(this));
+            // CRETE AGGREGATION OF MAGNITUDES //
+            var magnitude = +graphic.getAttribute("mag");
+            var magnitudeIndex = Math.floor(magnitude);
+            var magnitudeCount = magnitudes[magnitudeIndex];
+            magnitudes[magnitudeIndex] = (magnitudeCount) ? (magnitudeCount + 1) : 1;
 
-     this.updateDisplays = function () {
-     var byHourContentsNode = dom.byId("byHour-contents-node");
-     var byMagnitudeContentsNode = dom.byId("byMagnitude-contents-node");
-     domConstruct.empty(byHourContentsNode);
-     domConstruct.empty(byMagnitudeContentsNode);
-     this.displayHoursOfDay(byHourContentsNode, hoursOfDay);
-     this.displayMagnitudes(byMagnitudeContentsNode, magnitudes);
-     }.bind(this);
+            // CRETE AGGREGATION OF HOURS OF DAY //
+            var eventTime = new Date(graphic.getAttribute("eventTime"));
+            var hourOfDayIndex = eventTime.getUTCHours();
+            var hourOfDayCount = hoursOfDay[hourOfDayIndex];
+            hoursOfDay[hourOfDayIndex] = (hourOfDayCount) ? (hourOfDayCount + 1) : 1;
 
-     this.updateDisplays();
-     aspect.after(registry.byId("options-pane"), "resize", this.updateDisplays, true);
-     }
-
-     },*/
-
-    monitorGraphicsChange: function (view, sourceLayer, byHourContentsNode, byMagnitudeContentsNode) {
-
-      view.whenLayerView(sourceLayer).then(function (layerView) {
-        watchUtils.whenOnce(layerView, "controller").then(function (result) {
-          var controller = result.value;
-
-          var graphicsCollection = controller.graphics;
-          graphicsCollection.on("change", function (evt) {
-            console.info("CHANGE: ", graphicsCollection.length);
-
-            if(this.currentFilter.isDayUpdate) {
-
-              // CRETE AGGREGATION OF MAGNITUDES AND HOURS OF DAY //
-              var magnitudes = {};
-              var hoursOfDay = {};
-              graphicsCollection.forEach(function (graphic, gIndex) {
-
-                // CRETE AGGREGATION OF MAGNITUDES //
-                var magnitude = +graphic.getAttribute("mag");
-                var magnitudeIndex = Math.floor(magnitude);
-                var magnitudeCount = magnitudes[magnitudeIndex];
-                magnitudes[magnitudeIndex] = (magnitudeCount) ? (magnitudeCount + 1) : 1;
-
-                // CRETE AGGREGATION OF HOURS OF DAY //
-                var eventTime = new Date(graphic.getAttribute("eventTime"));
-                var hourOfDayIndex = eventTime.getUTCHours();
-                var hourOfDayCount = hoursOfDay[hourOfDayIndex];
-                hoursOfDay[hourOfDayIndex] = (hourOfDayCount) ? (hourOfDayCount + 1) : 1;
-
-              }.bind(this));
-
-              // UPDATE DISPLAYS //
-              this.updateDisplays = function () {
-                domConstruct.empty(byHourContentsNode);
-                domConstruct.empty(byMagnitudeContentsNode);
-                this.displayHoursOfDay(byHourContentsNode, hoursOfDay);
-                this.displayMagnitudes(byMagnitudeContentsNode, magnitudes);
-              }.bind(this);
-
-              // UPDATE DISPLAYS //
-              this.updateDisplays();
-
-              // UPDATE DISPLAYS WHEN CONTENT PANE IS RESIZED //
-              aspect.after(registry.byId("options-pane"), "resize", this.updateDisplays, true);
-            }
-          }.bind(this));
+          }
         }.bind(this));
-      }.bind(this));
+
+        // UPDATE DISPLAYS //
+        this.updateDisplays = function () {
+          domConstruct.empty(byHourContentsNode);
+          domConstruct.empty(byMagnitudeContentsNode);
+          this.displayHoursOfDay(byHourContentsNode, hoursOfDay);
+          this.displayMagnitudes(byMagnitudeContentsNode, magnitudes);
+        }.bind(this);
+
+        // UPDATE DISPLAYS //
+        this.updateDisplays();
+
+        // UPDATE DISPLAYS WHEN CONTENT PANE IS RESIZED //
+        aspect.after(registry.byId("options-pane"), "resize", this.updateDisplays, true);
+      }
 
     },
-
 
     /**
      * Ideas from here: http://dougmccune.com/blog/2011/04/21/visualizing-cyclical-time-hour-of-day-charts/
@@ -832,7 +813,7 @@ define([
           var hourBin = surface.createCircle({
             cx: countPnt.x,
             cy: countPnt.y,
-            r: 5.5 + (25.0 * (hourOfDayCount / 50.0))
+            r: 6.5 + (25.0 * (hourOfDayCount / 50.0))
           }).setFill("#ec5e2d");
           hourBin.selected = false;
           hourBin.hour = hour;
@@ -906,7 +887,7 @@ define([
           var hourBin = surface.createCircle({
             cx: countPnt.x,
             cy: countPnt.y,
-            r: 5.5 + (25.0 * (hourOfDayCount / 50.0))
+            r: 6.5 + (25.0 * (hourOfDayCount / 50.0))
           }).setFill("#ec5e2d");
           hourBin.selected = false;
           hourBin.hour = hour;
@@ -925,21 +906,37 @@ define([
       return hourBins;
     },
 
-
     createHourEvents: function (hourBins) {
 
-      function highlightBin(circle, highlight) {
-        if(!circle.selected) {
-          circle.setStroke(highlight ? { color: "#ccc", style: "solid", width: 1.5 } : null);
-        }
+      /* function highlightBin(circle, highlight) {
+       if(!circle.selected) {
+       circle.setStroke(highlight ? { color: "#ccc", style: "solid", width: 1.5 } : null);
+       }
+       }
+
+       function selectBin(circle, selected) {
+       circle.selected = selected;
+       circle.setStroke(selected ? { color: "#fff", style: "solid", width: 1.5 } : null);
+       }*/
+
+
+      function highlightBin(index, highlight) {
+        array.forEach(hourBins.slice(0, index + 1), function (hourBin) {
+          if(!hourBin.selected) {
+            hourBin.setStroke(highlight ? { color: "#ccc", style: "solid", width: 1.5 } : null);
+          }
+        });
       }
 
-      function selectBin(circle, selected) {
-        circle.selected = selected;
-        circle.setStroke(selected ? { color: "#fff", style: "solid", width: 1.5 } : null);
+      function selectBin(index, selected) {
+        array.forEach(hourBins.slice(0, index + 1), function (hourBin) {
+          hourBin.selected = selected;
+          hourBin.setStroke(selected ? { color: "#fff", style: "solid", width: 1.5 } : null);
+        });
       }
 
-      array.forEach(hourBins, function (hourBin) {
+
+      array.forEach(hourBins, function (hourBin, hourBinIndex) {
 
         hourBin.on("click", function (evt) {
 
@@ -953,30 +950,36 @@ define([
           });
           this.filterEarthquakes();
 
-          array.forEach(hourBins, function (otherHourBin) {
-            selectBin(otherHourBin, false);
-          }.bind(this));
-          selectBin(hourBin, true);
+
+          selectBin(hourBins.length, false);
+          selectBin(hourBinIndex, true);
+
+          /*array.forEach(hourBins, function (otherHourBin) {
+           selectBin(otherHourBin, false);
+           }.bind(this));
+           selectBin(hourBin, true);*/
+
         }.bind(this));
 
 
         hourBin.on(mouse.enter, function (evt) {
-          highlightBin(hourBin, true);
+
+          highlightBin(hourBinIndex, true);
+          on.once(evt.target, mouse.leave, function () {
+            highlightBin(hourBinIndex, false);
+          }.bind(this));
+
+          /*highlightBin(hourBin, true);
           on.once(evt.target, mouse.leave, function () {
             highlightBin(hourBin, false);
-          }.bind(this));
+          }.bind(this));*/
+
         }.bind(this));
 
       }.bind(this));
 
     },
 
-
-    /**
-     *
-     * @param parentNode
-     * @param magnitudes
-     */
     displayMagnitudes: function (parentNode, magnitudes) {
 
       // NODE DIMENSIONS //
@@ -1013,8 +1016,8 @@ define([
 
         var magnitudeCount = magnitudes.hasOwnProperty(magnitudeIndex) ? magnitudes[magnitudeIndex] : 0;
         var ringWidth = (magnitudeCount > 0) ? 1.0 + (10.5 * (magnitudeCount / maxMagnitudeCount)) : 0.5;
-        var ringColor = (magnitudeCount > 0) ? "#ec5e2d" : "#444";
-        var connectorColor = (magnitudeCount > 0) ? "#803319" : "#444";
+        var ringColor = (magnitudeCount > 0) ? "#ec5e2d" : "#555";
+        var connectorColor = (magnitudeCount > 0) ? "#803319" : "#555";
 
         // MAGNITUDE RING //
         var magnitudeCircle = surface.createCircle({
@@ -1067,18 +1070,34 @@ define([
       }
 
 
-      function highlightCircle(circles, highlight) {
-        if(!circles[0].selected) {
-          circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: highlight ? "#ccc" : "#ec5e2d" }));
-        }
+      /* function highlightCircle(circles, highlight) {
+       if(!circles[0].selected) {
+       circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: highlight ? "#ccc" : "#ec5e2d" }));
+       }
+       }
+
+       function selectCircle(circles, selected) {
+       circles[0].selected = selected;
+       circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: selected ? "#fff" : "#ec5e2d" }));
+       }*/
+
+      function highlightCircle(index, highlight) {
+        array.forEach(allMagnitudeCircles.slice(0, index + 1), function (circles) {
+          if(!circles[0].selected) {
+            circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: highlight ? "#ccc" : "#ec5e2d" }));
+          }
+        });
       }
 
-      function selectCircle(circles, selected) {
-        circles[0].selected = selected;
-        circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: selected ? "#fff" : "#ec5e2d" }));
+      function selectCircle(index, selected) {
+        array.forEach(allMagnitudeCircles.slice(0, index + 1), function (circles) {
+          circles[0].selected = selected;
+          circles[1].setStroke(lang.mixin(circles[1].getStroke(), { color: selected ? "#fff" : "#ec5e2d" }));
+        });
       }
 
-      array.forEach(allMagnitudeCircles, function (magnitudeCircles) {
+
+      array.forEach(allMagnitudeCircles, function (magnitudeCircles, magCircleIndex) {
 
         var indexCircle = magnitudeCircles[0];
         var magnitudeCircle = magnitudeCircles[1];
@@ -1091,18 +1110,28 @@ define([
           });
           this.filterEarthquakes();
 
-          array.forEach(allMagnitudeCircles, function (otherMagnitudeCircles) {
-            selectCircle(otherMagnitudeCircles, false);
-          }.bind(this));
-          selectCircle(magnitudeCircles, true);
+          selectCircle(allMagnitudeCircles.length, false);
+          selectCircle(magCircleIndex, true);
+          /*array.forEach(allMagnitudeCircles, function (otherMagnitudeCircles) {
+           selectCircle(otherMagnitudeCircles, false);
+           }.bind(this));
+           selectCircle(magnitudeCircles, true);*/
+
         }.bind(this));
 
 
         indexCircle.on(mouse.enter, function (evt) {
-          highlightCircle(magnitudeCircles, true);
+
+          highlightCircle(magCircleIndex, true);
           on.once(evt.target, mouse.leave, function () {
-            highlightCircle(magnitudeCircles, false);
+            highlightCircle(magCircleIndex, false);
           }.bind(this));
+
+          /* highlightCircle(magnitudeCircles, true);
+           on.once(evt.target, mouse.leave, function () {
+           highlightCircle(magnitudeCircles, false);
+           }.bind(this));*/
+
         }.bind(this));
 
       }.bind(this));
